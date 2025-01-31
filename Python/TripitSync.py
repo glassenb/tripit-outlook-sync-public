@@ -121,14 +121,7 @@ class TripitSync:
                 
                 # Convert to America/Chicago time
                 chicago_tz = ZoneInfo('America/Chicago')
-                result = dt_value.astimezone(chicago_tz).replace(tzinfo=None)
-                
-                # Log the conversion steps
-                log(f"Time conversion for {result.strftime('%Y-%m-%d %I:%M %p')}:")
-                log(f"  Input time (UTC): {dt_value.strftime('%Y-%m-%d %H:%M')} UTC")
-                log(f"  Chicago time: {result.strftime('%Y-%m-%d %I:%M %p')} CT")
-                
-                return result
+                return dt_value.astimezone(chicago_tz).replace(tzinfo=None)
                 
             elif isinstance(dt_value, datetime.date):
                 dt = datetime.datetime.combine(dt_value, datetime.time.min)
@@ -137,48 +130,35 @@ class TripitSync:
             else:
                 raise ValueError(f"Unexpected datetime type: {type(dt_value)}")
         except Exception as e:
-            log(f"Error in parse_datetime: {e} for value {dt_value}")
+            log(f"Error in parse_datetime: {e}")
             raise
 
     def create_appointment(self, calendar, event_data, retry=3):
         """Create calendar appointment with retries"""
         for attempt in range(retry):
             try:
-                # Log the exact times we're about to use
-                log(f"Creating appointment with times:")
-                log(f"  Subject: {event_data['subject']}")
-                log(f"  Raw start: {event_data['start']} ({type(event_data['start'])})")
-                log(f"  Raw end: {event_data['end']} ({type(event_data['end'])})")
-
                 # Create the appointment
                 appointment = calendar.Items.Add(1)  # 1 = olAppointmentItem
                 
-                # Set basic properties
+                # Set properties
                 appointment.Subject = event_data['subject']
                 appointment.Location = event_data['location']
                 appointment.Body = event_data['description']
                 appointment.ReminderSet = False
-                
-                # Set start and end times
                 appointment.Start = event_data['start'].strftime("%Y-%m-%d %H:%M")
                 appointment.End = event_data['end'].strftime("%Y-%m-%d %H:%M")
-                
-                # Save and verify
                 appointment.Save()
                 
-                # Log the actual times set in the appointment
-                log(f"Appointment created:")
-                log(f"  Set start: {appointment.Start}")
-                log(f"  Set end: {appointment.End}")
-                
+                # Log in concise format
+                log(f"Event: {event_data['subject']} ({event_data['start'].strftime('%I:%M %p')} - {event_data['end'].strftime('%I:%M %p')})")
                 return True
 
             except Exception as e:
                 if attempt == retry - 1:  # Last attempt
                     raise Exception(f"Failed to create appointment: {str(e)}")
-                log(f"Appointment creation failed (attempt {attempt + 1}/{retry}). Retrying...")
+                log(f"Retrying appointment creation... ({attempt + 1}/{retry})")
                 time.sleep(2)
-                calendar = self.get_calendar()  # Get fresh calendar reference
+                calendar = self.get_calendar()
 
         return False
 
@@ -193,6 +173,7 @@ class TripitSync:
             # Get calendar and clear it
             calendar = self.get_calendar()
             self.clear_calendar(calendar)
+            log("Starting sync...")
 
             # Parse ICS content
             cal = icalendar.Calendar.from_ical(content)
@@ -238,18 +219,29 @@ class TripitSync:
                         errors += 1
 
                 except Exception as e:
-                    log(f"Error processing event {component.get('summary', 'Unknown')}: {e}")
+                    log(f"Error with event {component.get('summary', 'Unknown')}: {e}")
                     errors += 1
 
-            log(f"Sync completed: {synced} events synced, {errors} errors")
+            log(f"Completed: {synced} events synced" + (f", {errors} errors" if errors > 0 else ""))
 
         except Exception as e:
             log(f"Sync failed: {e}")
             raise
 
+def load_config():
+    """Load configuration from config.json"""
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        return config['tripit_url']
+    except Exception as e:
+        log(f"Failed to load config.json: {e}")
+        log("Please copy config.example.json to config.json and add your TripIt URL")
+        sys.exit(1)
+
 def main():
-    tripit_url = "https://www.tripit.com/feed/ical/private/87AC5237-5F0628B3291C83F354859DD2E88969FC/tripit.ics"
-    
+    tripit_url = load_config()
     try:
         syncer = TripitSync(tripit_url)
         syncer.sync()
